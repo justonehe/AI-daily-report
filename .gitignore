@@ -1,0 +1,20 @@
+# 数据目录（绝不发布！含本地 SQLite、截图、报告）
+# 数据默认在 ~/.ai-daily/，不在本仓库内，但以防误操作，明确排除：
+.ai-daily/
+*.db
+*.db-journal
+screenshots/
+captures/
+
+# Python
+__pycache__/
+*.py[cod]
+*$py.class
+
+# 系统
+.DS_Store
+Thumbs.db
+
+# 临时
+*.tmp
+*.log
