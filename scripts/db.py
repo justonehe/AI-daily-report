@@ -32,7 +32,8 @@ CREATE TABLE IF NOT EXISTS samples (
     description   TEXT DEFAULT '',        -- AI 对截图的文字描述（截图已删）
     shot_taken    INTEGER DEFAULT 0,      -- 1=当时截了图，0=隐私模式/无权限/idle
     analyzed      INTEGER DEFAULT 0,      -- 0=截图待分析，1=已分析(或无需分析)
-    status        TEXT DEFAULT 'active'   -- active=活跃 / idle=空闲(≥阈值或屏保)
+    status        TEXT DEFAULT 'active',   -- active=活跃 / idle=空闲(≥阈值或屏保)
+    category      TEXT DEFAULT 'work'      -- work/communication/distraction/personal/idle（见 classify.py）
 );
 
 CREATE TABLE IF NOT EXISTS reports (
@@ -74,18 +75,19 @@ def connect():
 
 
 def insert_sample(ts: str, app: str, title: str = "", shot_taken: bool = False,
-                  status: str = "active") -> int:
+                  status: str = "active", category: str = "work") -> int:
     """插入一条采样。
 
     返回新行的 id，供 analyze.py 回填 description 时定位。
     没截图的样本直接标 analyzed=1（无需分析），让 aggregate 立即可用。
     status: active=活跃在工作 / idle=空闲(≥阈值或屏保运行)。
+    category: work/communication/distraction/personal/idle（见 classify.py）。
     """
     with connect() as c:
         cur = c.execute(
-            "INSERT INTO samples (ts, app, title, description, shot_taken, analyzed, status) "
-            "VALUES (?,?,?,?,?,?,?)",
-            (ts, app, title, "", 1 if shot_taken else 0, 0 if shot_taken else 1, status),
+            "INSERT INTO samples (ts, app, title, description, shot_taken, analyzed, status, category) "
+            "VALUES (?,?,?,?,?,?,?,?)",
+            (ts, app, title, "", 1 if shot_taken else 0, 0 if shot_taken else 1, status, category),
         )
         return cur.lastrowid
 
@@ -143,10 +145,11 @@ def _cli(argv: list[str]) -> int:
 
     cmd = argv[0]
     if cmd == "_insert":
-        # _insert TS APP TITLE SHOT_TAKEN STATUS
+        # _insert TS APP TITLE SHOT_TAKEN STATUS CATEGORY
         ts, app, title, shot = argv[1], argv[2], argv[3], argv[4]
         status = argv[5] if len(argv) > 5 else "active"
-        sid = insert_sample(ts, app, title, shot_taken=(shot == "1"), status=status)
+        category = argv[6] if len(argv) > 6 else "work"
+        sid = insert_sample(ts, app, title, shot_taken=(shot == "1"), status=status, category=category)
         print(sid)  # 只回显 id，capture.sh 依赖这个 stdout
         return 0
     if cmd == "_set_no_shot":

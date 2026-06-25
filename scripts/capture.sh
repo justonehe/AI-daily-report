@@ -58,10 +58,12 @@ else
   app=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || echo "Unknown")
 fi
 
-# --- 2. 先写库拿 id（截图文件名用 id 命名，便于 analyze.py 回填） -----------
+# --- 2. 分类（基于 app+title，见 classify.py）+ 写库拿 id ----------------
 shot_taken=0
 if [[ -z "$NO_SHOT" ]]; then shot_taken=1; fi
-sample_id=$($PY "$SCRIPT_DIR/db.py" _insert "$ts" "$app" "$title" "$shot_taken" active 2>/dev/null) || sample_id=""
+# 算分类：python3 classify.py _one <app> <title>
+category=$($PY "$SCRIPT_DIR/classify.py" _one "$app" "$title" 2>/dev/null) || category="work"
+sample_id=$($PY "$SCRIPT_DIR/db.py" _insert "$ts" "$app" "$title" "$shot_taken" active "$category" 2>/dev/null) || sample_id=""
 
 if [[ -z "$sample_id" ]]; then
   echo "capture: 写数据库失败，跳过本次" >&2

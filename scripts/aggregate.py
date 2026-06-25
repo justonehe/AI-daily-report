@@ -67,6 +67,7 @@ class Sample:
     title: str
     description: str
     status: str = "active"   # active / idle
+    category: str = "work"   # work/communication/distraction/personal/idle
 
 
 def load_samples(start: date, end: date) -> list[Sample]:
@@ -76,7 +77,7 @@ def load_samples(start: date, end: date) -> list[Sample]:
     out: list[Sample] = []
     with db.connect() as c:
         rows = c.execute(
-            "SELECT ts, app, title, description, status FROM samples ORDER BY ts"
+            "SELECT ts, app, title, description, status, category FROM samples ORDER BY ts"
         ).fetchall()
     for r in rows:
         try:
@@ -87,7 +88,8 @@ def load_samples(start: date, end: date) -> list[Sample]:
             continue
         out.append(Sample(dt, r["app"] or "Unknown", (r["title"] or "").strip(),
                           (r["description"] or "").strip(),
-                          (r["status"] or "active").strip()))
+                          (r["status"] or "active").strip(),
+                          (r["category"] or "work").strip()))
     return out
 
 
@@ -225,6 +227,45 @@ def app_focus(samples: list[Sample]) -> list[dict]:
             for a, v in sorted(stat.items(), key=lambda kv: -kv[1]["total_min"])]
 
 
+def category_breakdown(samples: list[Sample]) -> list[dict]:
+    """按分类统计停留时长占比（周报"专注模式"核心数据）。
+
+    用中点法估算每个 category 的停留秒数（同 dwell 逻辑，按 category 而非 app）。
+    返回 [{category, label, minutes, percent, color}] 按 minutes 降序。
+    """
+    try:
+        from classify import CATEGORY_COLORS, CATEGORY_LABELS
+    except ImportError:
+        import sys
+        sys.path.insert(0, str(Path(__file__).parent))
+        from classify import CATEGORY_COLORS, CATEGORY_LABELS
+
+    # 复用 dwell 的中点法，但按 category 累计
+    secs: dict[str, float] = {}
+    active_idx = [i for i, s in enumerate(samples) if s.status != "idle"]
+    for k, i in enumerate(active_idx[:-1]):
+        j = active_idx[k + 1]
+        if j != i + 1:
+            continue
+        gap = (samples[j].dt - samples[i].dt).total_seconds()
+        if gap <= 0:
+            continue
+        secs[samples[i].category] = secs.get(samples[i].category, 0) + gap / 2.0
+        secs[samples[j].category] = secs.get(samples[j].category, 0) + gap / 2.0
+
+    total = sum(secs.values()) or 1
+    out = []
+    for cat, sec in sorted(secs.items(), key=lambda kv: -kv[1]):
+        out.append({
+            "category": cat,
+            "label": CATEGORY_LABELS.get(cat, cat),
+            "minutes": round(sec / 60),
+            "percent": round(sec / total * 100),
+            "color": CATEGORY_COLORS.get(cat, "#999"),
+        })
+    return out
+
+
 def render_json(samples: list[Sample], start: date, end: date) -> str:
     return json.dumps(
         {
@@ -239,9 +280,11 @@ def render_json(samples: list[Sample], start: date, end: date) -> str:
             },
             "activity_grid": activity_grid(samples),
             "app_focus": app_focus(samples),
+            "category_breakdown": category_breakdown(samples),
             "timeline": [
                 {"time": s.dt.strftime("%H:%M"), "app": s.app,
-                 "title": s.title, "description": s.description, "status": s.status}
+                 "title": s.title, "description": s.description, "status": s.status,
+                 "category": s.category}
                 for s in samples
             ],
         },

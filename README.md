@@ -227,6 +227,23 @@ ai-daily-report/
 └── reports/             # 生成的 HTML 报告
 ```
 
+## 致谢与参考
+
+本项目在设计与实现上参考了以下优秀开源项目，特此致谢：
+
+### [Dayflow](https://github.com/JerryZLiu/Dayflow) — by Jerry Liu
+
+> *The automatic work journal. Privately turns your screen into a timeline of what you actually accomplished.*
+
+Dayflow 是一款本地优先的开源 macOS 应用，把屏幕活动自动转化为工作日志。本项目的以下设计直接受其启发：
+
+- **日报的 "standup" 结构**：昨日亮点 / 今日重点 / 阻塞项 三栏布局，让日报能直接带进站会。
+- **"3-5 件真正推动进展的事" 理念**：日报不是流水账，而是高信号的成就清单——借鉴了 Dayflow 的 prompt 设计哲学（先说结果、用具体名词、跳过浏览噪音、禁用咨询黑话）。
+- **活动分类体系**：把活动归类为 工作 / 沟通 / 分心 / 个人 / 空闲，周报据此产出"专注模式"统计。
+- **分心识别**：人在屏幕前但没干正事（社交/视频）≠ 空闲，独立区分。
+
+> Dayflow 是独立的 macOS App（开箱即用的原生体验 + 丰富的可视化），本项目是 Agent Skill（轻量、集成进 Agent 工作流）。两者面向不同场景，Dayflow 的产品设计值得深入学习。
+
 ## 许可证
 
 MIT

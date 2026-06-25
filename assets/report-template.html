@@ -68,6 +68,12 @@
   .badge.plan{background:var(--indigo-bg);color:var(--indigo)}
   ul.items li .txt{flex:1}
 
+  /* 分类统计（周报：工作/沟通/分心占比，水平堆叠条） */
+  .cat-bar{display:flex;height:28px;border-radius:6px;overflow:hidden;margin:10px 0 6px}
+  .cat-bar .seg{display:flex;align-items:center;justify-content:center;font-size:11px;color:#fff;font-weight:600;white-space:nowrap;overflow:hidden}
+  .cat-legend{display:flex;flex-wrap:wrap;gap:14px;font-size:12px;color:var(--muted)}
+  .cat-legend .dot{display:inline-block;width:10px;height:10px;border-radius:2px;margin-right:4px;vertical-align:middle}
+
   /* 停留时长条 */
   .dwell-row{display:grid;grid-template-columns:110px 1fr 60px;gap:14px;align-items:center;padding:8px 0}
   .dwell-row .app{font-weight:600;font-size:14px}
@@ -138,6 +144,10 @@
   <!-- SLOT: focus -->
   <!-- weekly 用：专注模式分类。每条 .focus-row（app / 专注块数 / 时长条 / 总时长） -->
   <!-- /SLOT: focus -->
+
+  <!-- SLOT: categories -->
+  <!-- weekly 用：分类占比（工作/沟通/分心/个人/空闲）。水平堆叠条 .cat-bar + 图例 -->
+  <!-- /SLOT: categories -->
 
   <!-- SLOT: dwell -->
   <section>
