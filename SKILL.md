@@ -19,14 +19,23 @@ AI 驱动的工作日报工具。两条核心承诺贯穿始终：
 
 ## 工作原理
 
+两种记录模式，都支持**空闲检测**（鼠标键盘 ≥10 分钟无操作或屏保运行 → 记 `idle`，不截图）：
+
+**模式 A：后台记录（watch.sh）**——简单，但截图要等生成日报时才批量分析。
 ```
-watch.sh ─每5分→ capture.sh ─写→ SQLite(samples) + 暂存截图 screenshots/<id>.png
-                                      │
-              要日报时(AI在场):         │
-              1. analyze.py --list ────┘  列出待分析截图
-              2. AI 逐张读图 → analyze.py _set <id> "描述"  (写描述 + 删图)
-              3. aggregate.py  聚合 samples → 素材(停留时长+时间线)
-              4. AI 套 assets/report-template.html → reports/<类型>-<日期>.html
+watch.sh ─每5分→ capture.sh ─先查 idle.sh─→ SQLite + 暂存截图(多屏各一张)
+                     │  idle?                       ↓ 要日报时(AI在场):
+                     └─≥阈值→ 记 idle(不截图)       analyze.py 批量看图+删图
+```
+
+**模式 B：Agent 实时记录（推荐）**——Agent 自己循环，采一帧立刻分析删图，描述更准、截图不留存。
+```
+Agent 循环(每N分):
+  1. capture.sh          采一帧（含空闲检测）→ 暂存截图
+  2. AI 立刻看图(5v)     生成"在做什么"描述
+  3. analyze.py _set     写描述 + 删图（截图零留存）
+  4. sleep N             等下一轮
+要日报时: aggregate.py 聚合 → 套 report-template.html → reports/*.html
 ```
 
 **职责分离**：
@@ -67,10 +76,13 @@ export AI_DAILY_NO_SHOT=1   # 当前 shell 生效；或每次命令前加
 
 | 操作 | 命令 | 说明 |
 |------|------|------|
-| 采一次样本 | `bash $SK/scripts/capture.sh` | 写库 + 暂存截图 |
-| 持续记录 | `bash $SK/scripts/watch.sh` | 前台常驻，Ctrl-C 停 |
+| 采一次样本 | `bash $SK/scripts/capture.sh` | 含空闲检测；写库 + 暂存截图 |
+| 持续记录(后台) | `bash $SK/scripts/watch.sh` | 前台常驻，Ctrl-C 停 |
+| 实时记录(推荐) | （Agent 自跑循环，见工作流 D） | 采→立刻分析→删图，截图零留存 |
 | 指定间隔 | `bash $SK/scripts/watch.sh 10` | 每 10 分钟 |
 | 隐私模式 | `AI_DAILY_NO_SHOT=1 bash $SK/scripts/watch.sh` | 不截图 |
+| 自定义空闲阈值 | `AI_DAILY_IDLE_MINS=5 bash $SK/scripts/capture.sh` | 默认 10 分钟 |
+| 查空闲状态 | `bash $SK/scripts/idle.sh; echo $?` | 输出空闲秒数；退出码 0=活跃 1=空闲 |
 | 检查数据库 | `python3 $SK/scripts/db.py` | 初始化/看条数 |
 | 列待分析截图 | `python3 $SK/scripts/analyze.py --list` | 生成报告前先跑 |
 | 存描述+删图 | `python3 $SK/scripts/analyze.py _set <id> "描述"` | AI 读图后逐张调 |
@@ -79,13 +91,33 @@ export AI_DAILY_NO_SHOT=1   # 当前 shell 生效；或每次命令前加
 | 某天/周/月 | `python3 $SK/scripts/aggregate.py --day/--week/--month` | |
 | 素材 JSON | `python3 $SK/scripts/aggregate.py --json` | 程序化消费 |
 
-## 工作流 A：开始记录一天
+## 工作流 A：开始记录一天（后台模式）
 
 用户说"开始记录我的一天""帮我记录工作""开始工作轨迹"时：
 
 1. 后台运行 `bash $SK/scripts/watch.sh`（用 `run_in_background`，不阻塞会话）。隐私模式加 `AI_DAILY_NO_SHOT=1`。
 2. 告诉用户：已在后台记录，每 5 分钟一次；下班或想要日报时说一声。
 3. 不要让记录阻塞你继续响应其他请求。
+4. 注意：后台模式下截图会暂存，要等生成日报时（工作流 B）才批量分析+删除。
+
+## 工作流 D：实时记录（Agent 驱动，推荐）⭐
+
+用户说"帮我盯着记录一下午""实时记录"时——比后台模式更准：截图采完立刻分析删图，不留存。
+
+**你自己（Agent）跑这个循环**，每轮：
+1. **采集**：`bash $SK/scripts/capture.sh`
+   - capture.sh 内部会先查空闲状态：若 ≥10 分钟无操作/屏保，记 idle（不截图），直接跳到第 4 步 sleep。
+   - 活跃则采 app/title + 多屏截图，写入 SQLite，暂存截图。
+2. **立刻分析截图**（仅当 active 且有截图）：按工作流 B 步骤 2 的方法（缩小→Read 上传→5v 看图→`_set` 写描述删图）。**每帧即采即分析，截图零留存**。
+3. **简短反馈**：告诉用户"已记录 12:30 — 在 Chrome 查 React 文档"。
+4. **等下一轮**：`sleep $((间隔分钟 * 60))`。默认 5 分钟，用户可指定。
+5. 重复，直到用户说停。
+
+**与后台模式的取舍**：
+- 实时模式：描述准、截图零留存，但占用 Agent（期间 Agent 在循环，不方便并行做别的）。
+- 后台模式：不占 Agent，但截图要攒着、日报时批量分析，且暂存期间有留存。
+
+**空闲检测**：capture.sh 自动处理，无需你判断。连续多轮 idle 时，时间线会显示"🕓 空闲 — 不在电脑前"。空闲时长不计入工作停留时长。
 
 ## 工作流 B：生成日报（核心场景）⭐
 

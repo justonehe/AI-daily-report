@@ -5,15 +5,20 @@
 # 写入本地 SQLite（scripts/db.py），截图存到 screenshots/<id>.png 等 analyze.py
 # 分析后删除——**数据库里永不保存图片路径，只保存 AI 文字描述**。
 #
+# 空闲检测：采前先调 idle.sh，若鼠标键盘 ≥10 分钟无操作或屏保运行，
+# 记一条 status=idle 的样本（不截图），跳过应用采集和截图。
+#
 # 设计为"单次幂等动作"：watch.sh 循环调用它，也能单独触发。
 #
 # 用法:
 #   ./capture.sh                       # 应用/窗口 + 临时截图（待 AI 分析后删）
 #   AI_DAILY_NO_SHOT=1 ./capture.sh    # 只记应用/窗口，不截图
+#   AI_DAILY_IDLE_MINS=5 ./capture.sh  # 自定义空闲阈值（分钟，默认 10）
 #
 # 环境变量:
-#   AI_DAILY_DIR     数据目录，默认 ~/.ai-daily
-#   AI_DAILY_NO_SHOT 任何非空值 = 跳过截图（隐私模式 / 无屏权限时）
+#   AI_DAILY_DIR       数据目录，默认 ~/.ai-daily
+#   AI_DAILY_NO_SHOT   任何非空值 = 跳过截图（隐私模式 / 无屏权限时）
+#   AI_DAILY_IDLE_MINS 空闲阈值（分钟），默认 10
 set -euo pipefail
 
 SCRIPT_DIR="$(cd "$(dirname "${BASH_SOURCE[0]}")" && pwd)"
@@ -23,6 +28,25 @@ NO_SHOT="${AI_DAILY_NO_SHOT:-}"
 SHOTS_DIR="$DATA_DIR/screenshots"
 
 mkdir -p "$SHOTS_DIR"
+
+ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
+
+# --- 0. 空闲检测（≥阈值或屏保 → 记 idle，不截图） ------------------------
+# 注意：idle.sh 用退出码 1 表示空闲。set -e 下命令替换返回非零会触发退出，
+# 所以先临时关掉 set -e，拿到退出码再恢复。
+set +e
+idle_out=$(bash "$SCRIPT_DIR/idle.sh" 2>/dev/null)
+idle_rc=$?
+set -e
+idle_s=$(echo "$idle_out" | head -1)
+ss_line=$(echo "$idle_out" | sed -n '2p')
+# idle.sh 返回码：0=活跃，1=空闲
+if [[ "$idle_rc" == "1" ]]; then
+  # 空闲：记一条 idle 样本，不截图
+  sample_id=$($PY "$SCRIPT_DIR/db.py" _insert "$ts" "—" "" 0 idle 2>/dev/null) || sample_id=""
+  echo "captured(idle): id=$sample_id | $ts | 空闲/不在电脑前 (${ss_line:-screensaver=0}, idle=${idle_s:-?}s)"
+  exit 0
+fi
 
 # --- 1. 取前台应用名 + 窗口标题 -------------------------------------------
 app=""
@@ -34,12 +58,10 @@ else
   app=$(osascript -e 'tell application "System Events" to get name of first application process whose frontmost is true' 2>/dev/null || echo "Unknown")
 fi
 
-ts=$(date -u +%Y-%m-%dT%H:%M:%SZ)
-
 # --- 2. 先写库拿 id（截图文件名用 id 命名，便于 analyze.py 回填） -----------
 shot_taken=0
 if [[ -z "$NO_SHOT" ]]; then shot_taken=1; fi
-sample_id=$($PY "$SCRIPT_DIR/db.py" _insert "$ts" "$app" "$title" "$shot_taken" 2>/dev/null) || sample_id=""
+sample_id=$($PY "$SCRIPT_DIR/db.py" _insert "$ts" "$app" "$title" "$shot_taken" active 2>/dev/null) || sample_id=""
 
 if [[ -z "$sample_id" ]]; then
   echo "capture: 写数据库失败，跳过本次" >&2

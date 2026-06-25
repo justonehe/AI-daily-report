@@ -66,6 +66,7 @@ class Sample:
     app: str
     title: str
     description: str
+    status: str = "active"   # active / idle
 
 
 def load_samples(start: date, end: date) -> list[Sample]:
@@ -75,7 +76,7 @@ def load_samples(start: date, end: date) -> list[Sample]:
     out: list[Sample] = []
     with db.connect() as c:
         rows = c.execute(
-            "SELECT ts, app, title, description FROM samples ORDER BY ts"
+            "SELECT ts, app, title, description, status FROM samples ORDER BY ts"
         ).fetchall()
     for r in rows:
         try:
@@ -85,7 +86,8 @@ def load_samples(start: date, end: date) -> list[Sample]:
         if not (start_local <= dt < end_local):
             continue
         out.append(Sample(dt, r["app"] or "Unknown", (r["title"] or "").strip(),
-                          (r["description"] or "").strip()))
+                          (r["description"] or "").strip(),
+                          (r["status"] or "active").strip()))
     return out
 
 
@@ -103,13 +105,23 @@ def dwell_times(samples: list[Sample]) -> dict[str, float]:
 
 
 def _dwell_pairs(samples: list[Sample]):
-    """yield (app, seconds)：相邻样本时长对半分给前后两个 App。"""
-    for i, s in enumerate(samples[:-1]):
-        gap = (samples[i + 1].dt - s.dt).total_seconds()
+    """yield (app, seconds)：相邻样本时长对半分给前后两个 App。
+
+    idle 样本（status=idle）不计入停留——空闲时段不算某 App 的工作时间。
+    处理方式：idle 样本跳过（既不贡献也不接收时长），相当于把时间线在 idle 处断开。
+    """
+    # 只在相邻 active 样本之间分配时长；idle 样本像"断点"一样切分时间线
+    active_idx = [i for i, s in enumerate(samples) if s.status != "idle"]
+    for k, i in enumerate(active_idx[:-1]):
+        j = active_idx[k + 1]
+        # 只处理紧邻的 active 对（中间不能隔 idle）
+        if j != i + 1:
+            continue
+        gap = (samples[j].dt - samples[i].dt).total_seconds()
         if gap <= 0:
             continue
-        yield (s.app, gap / 2.0)
-        yield (samples[i + 1].app, gap / 2.0)
+        yield (samples[i].app, gap / 2.0)
+        yield (samples[j].app, gap / 2.0)
 
 
 def fmt_duration(sec: float) -> str:
@@ -136,11 +148,12 @@ def render(samples: list[Sample], start: date, end: date) -> str:
         return "\n".join(lines)
 
     n_desc = sum(1 for s in samples if s.description)
+    n_idle = sum(1 for s in samples if s.status == "idle")
     lines.append(f"- 采样时间跨度：{samples[0].dt:%H:%M} – {samples[-1].dt:%H:%M}（本地）")
-    lines.append(f"- 样本数：{len(samples)}（其中 {n_desc} 条带 AI 截图描述）\n")
+    lines.append(f"- 样本数：{len(samples)}（活跃 {len(samples)-n_idle} / 空闲 {n_idle}；{n_desc} 条带描述）\n")
 
     secs = dwell_times(samples)
-    lines.append("## 停留时长 Top\n")
+    lines.append("## 停留时长 Top（仅活跃时段）\n")
     lines.append("| 应用 | 估计停留 |")
     lines.append("| --- | --- |")
     for app, sec in sorted(secs.items(), key=lambda kv: -kv[1])[:10]:
@@ -150,6 +163,9 @@ def render(samples: list[Sample], start: date, end: date) -> str:
     lines.append("## 时间线\n")
     for s in samples:
         t = s.dt.strftime("%H:%M")
+        if s.status == "idle":
+            lines.append(f"- **{t}** 🕓 `空闲` — 不在电脑前")
+            continue
         desc = s.description or "（无截图描述）"
         lines.append(f"- **{t}** `{s.app}` — {s.title or '—'}")
         lines.append(f"  - {desc}")
@@ -162,13 +178,15 @@ def render_json(samples: list[Sample], start: date, end: date) -> str:
             "range": {"start": start.isoformat(), "end": end.isoformat()},
             "summary": {
                 "sample_count": len(samples),
+                "active": sum(1 for s in samples if s.status != "idle"),
+                "idle": sum(1 for s in samples if s.status == "idle"),
                 "with_description": sum(1 for s in samples if s.description),
                 "dwell": {a: round(v) for a, v in sorted(
                     dwell_times(samples).items(), key=lambda kv: -kv[1])},
             },
             "timeline": [
                 {"time": s.dt.strftime("%H:%M"), "app": s.app,
-                 "title": s.title, "description": s.description}
+                 "title": s.title, "description": s.description, "status": s.status}
                 for s in samples
             ],
         },
