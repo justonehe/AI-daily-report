@@ -29,18 +29,43 @@
 
 ## 各 SLOT 内容
 
-- **`{{ITEMS_TITLE}}`** items 区的标题（如"今日完成"/"本周进展"/"主要成果"）。条目：
+### activity-grid（日报顶部热力图）
+
+24 格，每格代表一小时。数据来自 `aggregate --json` 的 `activity_grid`（长度 24 的数组，值=该小时活跃样本数）。
+```html
+<div class="grid">
+  <div class="col"><div class="cell l3"></div><div class="hr">9</div></div>
+  ...
+</div>
+```
+level 映射（按样本数）：0→`l0`(无 class, 灰)，1→`l1`，2-3→`l2`，4-5→`l3`，≥6→`l4`。只显示有活动的时段范围（如 8-20 点），两端全 0 的可裁掉。标题用 `<section><h2>今日活动</h2><div class="card">...</div></section>`。
+
+### standup（日报三栏）
+
+借鉴 Dayflow 的 standup 视图，三栏并排：
+```html
+<div class="three-col">
+  <div class="panel hi"><h3>★ 昨日亮点</h3><ul><li>事项1</li>...</ul></div>
+  <div class="panel pri"><h3>◆ 今日重点</h3><ul><li>事项1</li>...</ul></div>
+  <div class="panel blk"><h3>⚑ 阻塞项</h3><ul><li>事项1</li>...</ul></div>
+</div>
+```
+- **昨日亮点**：从昨天（-1天）的 samples 里挑完成的代表性事项。用 `aggregate --day <昨天>` 取数据。
+- **今日重点**：从今天轨迹归纳出的核心工作（≤5 条）。
+- **阻塞项**：轨迹里体现"等待/卡住"的（如长时间在通讯软件、重复查看同一页面），或 AI 推断的卡点。
+
+### items / dwell / timeline（原有，不变）
+
+- **`{{ITEMS_TITLE}}`** items 区标题。条目：
   ```html
-  <li><span class="badge done">完成</span>事项文本</li>
-  <li><span class="badge doing">进行中</span>事项文本</li>
-  <li><span class="badge plan">计划</span>事项文本</li>
+  <li><span class="badge done">完成</span><span class="txt">事项文本</span></li>
   ```
-- **`{{DWELL_TITLE}}`** dwell 区标题（如"工作分布"/"投入占比"）。每条：
+- **`{{DWELL_TITLE}}`** dwell 区标题。每条：
   ```html
   <div class="dwell-row"><div class="app">Code</div><div class="bar"><i style="width:100%"></i></div><div class="dur">1h05m</div></div>
   ```
-  `width` = 该 App 时长 / 最大时长 × 100（取整）。时长来自 `aggregate.py --json` 的 `summary.dwell`。
-- **`{{TIMELINE_TITLE}}`** timeline 区标题（如"时间线"）。每条 `.ev`：
+  `width` = 该 App 时长 / 最大时长 × 100。时长来自 `summary.dwell`。
+- **`{{TIMELINE_TITLE}}`** timeline 区标题。每条 `.ev`（idle 段加 `class="ev idle"`）：
   ```html
   <div class="ev">
     <span class="t">09:00</span><span class="app">Code</span>
@@ -49,13 +74,26 @@
   </div>
   ```
 
+### focus（周报专注模式）
+
+数据来自 `aggregate --json` 的 `app_focus`（按 App 的连续专注块统计）。每条：
+```html
+<div class="focus-row">
+  <div class="app">Code</div>
+  <div class="blk">3块</div>
+  <div class="bar"><i style="width:100%"></i></div>
+  <div class="dur">1h20m</div>
+</div>
+```
+`minutes` 转成时长显示，`width` = 该 App 专注总时长 / 最大值 × 100。
+
 ## 各报告类型用哪些 SLOT
 
-| 类型 | overview | items | dwell | timeline |
-|------|----------|-------|-------|----------|
-| daily  | 删 | 今日完成/进行中/明日计划 | 可选 | 用 |
-| weekly | 删 | 本周进展/产出/风险/下周计划 | 工作分布 | 可选 |
-| monthly| 本月概览 | 成果/改进/下月计划 | 投入占比 | 删 |
+| 类型 | activity-grid | standup | overview | items | focus | dwell | timeline |
+|------|---------------|---------|----------|-------|-------|-------|----------|
+| daily  | ✅ 用 | ✅ 用 | 删 | 可选(细化) | 删 | 可选 | 用 |
+| weekly | 删 | 删 | 删 | 本周进展 | ✅ 用 | 工作分布 | 可选 |
+| monthly| 删 | 删 | 本月概览 | 成果/改进 | 可选 | 投入占比 | 删 |
 
 ## 推理规则（AI 引擎职责，不是搬运素材）
 

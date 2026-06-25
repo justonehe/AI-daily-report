@@ -172,6 +172,59 @@ def render(samples: list[Sample], start: date, end: date) -> str:
     return "\n".join(lines) + "\n"
 
 
+def activity_grid(samples: list[Sample]) -> list[int]:
+    """24 格活动网格：每格 = 该小时活跃样本数（status!=idle）。
+
+    用于日报顶部的 GitHub 风格热力图。0=无活动，数值越大颜色越深。
+    """
+    grid = [0] * 24
+    for s in samples:
+        if s.status == "idle":
+            continue
+        grid[s.dt.hour] += 1
+    return grid
+
+
+def app_focus(samples: list[Sample]) -> list[dict]:
+    """统计每个 App 的"专注块"：连续用同一个 App 的时段（不切换）。
+
+    用于周报的"专注模式"——看一天里在哪些 App 上有连续的深度工作。
+    返回 [{app, count, total_gap_min}] 按专注块数排序。
+    """
+    if not samples:
+        return []
+    blocks = []  # (app, start_dt, end_dt)
+    cur_app = None
+    cur_start = None
+    cur_end = None
+    for s in samples:
+        if s.status == "idle":
+            # idle 打断专注块
+            if cur_app and cur_start:
+                blocks.append((cur_app, cur_start, cur_end))
+            cur_app, cur_start, cur_end = None, None, None
+            continue
+        if s.app == cur_app:
+            cur_end = s.dt
+        else:
+            if cur_app and cur_start:
+                blocks.append((cur_app, cur_start, cur_end))
+            cur_app, cur_start, cur_end = s.app, s.dt, s.dt
+    if cur_app and cur_start:
+        blocks.append((cur_app, cur_start, cur_end))
+
+    # 按时段长度 > 15 分钟才算"专注块"
+    from collections import defaultdict
+    stat = defaultdict(lambda: {"count": 0, "total_min": 0.0})
+    for app, st, en in blocks:
+        mins = (en - st).total_seconds() / 60
+        if mins >= 15:
+            stat[app]["count"] += 1
+            stat[app]["total_min"] += mins
+    return [{"app": a, "blocks": v["count"], "minutes": round(v["total_min"])}
+            for a, v in sorted(stat.items(), key=lambda kv: -kv[1]["total_min"])]
+
+
 def render_json(samples: list[Sample], start: date, end: date) -> str:
     return json.dumps(
         {
@@ -184,6 +237,8 @@ def render_json(samples: list[Sample], start: date, end: date) -> str:
                 "dwell": {a: round(v) for a, v in sorted(
                     dwell_times(samples).items(), key=lambda kv: -kv[1])},
             },
+            "activity_grid": activity_grid(samples),
+            "app_focus": app_focus(samples),
             "timeline": [
                 {"time": s.dt.strftime("%H:%M"), "app": s.app,
                  "title": s.title, "description": s.description, "status": s.status}
