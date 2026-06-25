@@ -85,7 +85,8 @@ export AI_DAILY_NO_SHOT=1   # 当前 shell 生效；或每次命令前加
 | 查空闲状态 | `bash $SK/scripts/idle.sh; echo $?` | 输出空闲秒数；退出码 0=活跃 1=空闲 |
 | 检查数据库 | `python3 $SK/scripts/db.py` | 初始化/看条数 |
 | 列待分析截图 | `python3 $SK/scripts/analyze.py --list` | 生成报告前先跑 |
-| 存描述+删图 | `python3 $SK/scripts/analyze.py _set <id> "描述"` | AI 读图后逐张调 |
+| **本地 OCR 分析+删图** | `python3 $SK/scripts/analyze.py --ocr` | **默认通道**：Vision OCR，零上传 |
+| 存描述+删图 | `python3 $SK/scripts/analyze.py _set <id> "描述"` | 手动/5v 用 |
 | 放弃分析清空 | `python3 $SK/scripts/analyze.py --purge` | 直接删所有暂存图 |
 | 生成今日素材 | `python3 $SK/scripts/aggregate.py` | 默认今天，输出 Markdown |
 | 某天/周/月 | `python3 $SK/scripts/aggregate.py --day/--week/--month` | |
@@ -127,23 +128,23 @@ export AI_DAILY_NO_SHOT=1   # 当前 shell 生效；或每次命令前加
 
 **步骤 2 — 分析截图（隐私关键步，必须做）**：
 ```bash
-python3 $SK/scripts/analyze.py --list
+python3 $SK/scripts/analyze.py --list   # 先看有多少待分析
+python3 $SK/scripts/analyze.py --ocr    # 默认：本地 Vision OCR，零上传
 ```
-多显示器：一个样本可能有多张图（`<id>.d1.png`、`<id>.d2.png`...，每块屏一张）。对列出的**每个样本的所有截图**，合并出一句"在做什么"的描述。**优先用 `mcp__4_5v_mcp__analyze_image` 工具（5v 视觉模型）**，它对中文文字识别比模型自身视觉更准：
 
-1. **缩小截图**（关键！真实截图约 2-3MB，直接 Read 会内联、拿不到 CDN URL）。对每张 `<id>.dN.png` 缩到宽 1100px、JPEG：
-   ```bash
-   python3 -c "from PIL import Image; im=Image.open('$HOME/.ai-daily/screenshots/<id>.d<N>.png').convert('RGB'); w,h=im.size; im.resize((1100,int(h*1100/w))).save('/tmp/<id>.d<N>.jpg','JPEG',quality=85)"
-   ```
-2. 用 `Read` 工具读每张缩小后的 `/tmp/<id>.d<N>.jpg`——小图会触发上传，返回**带签名的 CDN URL**。
-3. 把各 CDN URL 传给 `mcp__4_5v_mcp__analyze_image`，prompt 用："这张截图显示的是什么应用/界面？屏幕上的主要文字内容是什么？用一句话概括用户在做什么。"多屏样本综合各屏内容，凝练成**一句**描述。
-4. 拿到 5v 返回的描述，结合已知的 app/title 上下文，凝练成一句中文描述（如"在浏览器里查登录鉴权的文档，对比 JWT 与 session 方案"）。
-5. 立即执行 `python3 $SK/scripts/analyze.py _set <id> "描述"` ——这会**把描述写库并删除该样本所有屏的截图**。最后 `rm /tmp/<id>.d*.jpg` 清掉缩略图。
+**默认用本地 OCR**（`--ocr`）：调用 macOS 系统自带的 Vision.framework，**数据完全不出本机**，原生支持中英日韩。它会：
+- 对每个样本的所有屏截图跑 OCR，把识别到的文字汇总成 description 写库
+- **立即删除所有截图**
+- 全程零上传——这是隐私最优的通道，且无需任何额外配置（macOS 12+ 自带）
 
-> **5v 工具的坑（实测）**：① 只接受**远程 URL**，传本地路径会报 `1210 图片格式/解析错误`；所以必须先 Read 上传拿 CDN URL。② 大图（>200KB）Read 会内联不返回 URL，**必须先缩小**。③ 低分辨率小图上的中文可能识别成方块，宽 1100px 下中文识别准确。
-> **兜底**：若 5v 工具不可用，退回到用你自己的视觉能力（Read 图片后直接描述）。若用户不想让你看图，或图太多，跑 `analyze.py --purge` 直接清空暂存图（不生成描述），聚合仍可用 app/title。
+> OCR 提取的是**文字原文**（如"Agent context management expansion agent-context-governance"），不做语义加工。语义推理（"在做什么"）留到步骤 4 生成日报时由你（AI）完成——结合 app/title + OCR 文字推断工作事项。
 
-- 全部处理完，`--list` 应显示"没有待分析的截图"。**确认没有截图残留**。
+- 处理完，`--list` 应显示"没有待分析的截图"。**确认没有截图残留**。
+
+**可选：5v 增强模式**（需要语义理解时，但会上传截图到云端）
+仅当用户明确要"更智能的分析"或 OCR 文字不足以判断时，才用 `mcp__4_5v_mcp__analyze_image`（代价：截图要上传到 5v 云端）。流程见仓库历史文档或下述要点：缩小截图（宽 1100px JPEG）→ Read 上传拿 CDN URL → 喂给 5v → `analyze.py _set <id> "描述"` 删图。**默认不要用 5v，OCR 已足够。**
+
+> **兜底**：若 OCR 失败（如非 macOS 或缺 Xcode CLT），跑 `analyze.py --purge` 清空暂存图（不生成描述），聚合仍可用 app/title。
 
 **步骤 3 — 聚合素材**：
 ```bash

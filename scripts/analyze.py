@@ -82,9 +82,60 @@ def purge() -> int:
     return 0
 
 
+def ocr_all() -> int:
+    """对所有待分析截图跑本地 Vision OCR，文字作为 description 写库删图。
+
+    全程零上传：OCR 用 macOS 系统 Vision.framework，数据不出本机。
+    description 是 OCR 原文（去重、截断），不做语义加工——语义推理交给
+    aggregate/日报生成阶段的 AI 引擎。这是默认的截图分析通道。
+    """
+    import subprocess
+    ocr_sh = Path(__file__).parent / "ocr.sh"
+    rows = db.pending_shots()
+    if not rows:
+        print("（没有待分析的截图）")
+        return 0
+    print(f"本地 OCR 分析 {len(rows)} 个样本（Vision.framework，零上传）...")
+    done = 0
+    for r in rows:
+        files = _shot_files(r["id"])
+        texts = []
+        for p in files:
+            try:
+                out = subprocess.run(
+                    ["bash", str(ocr_sh), str(p)],
+                    capture_output=True, text=True, timeout=30,
+                )
+                txt = out.stdout.strip()
+                if txt:
+                    texts.append(txt)
+            except Exception as e:
+                print(f"  id={r['id']} {p.name} OCR 失败: {e}", file=sys.stderr)
+        # 合并多屏文字，去重空行，截断到合理长度
+        all_lines = []
+        seen = set()
+        for t in texts:
+            for line in t.splitlines():
+                line = line.strip()
+                if line and line not in seen:
+                    seen.add(line)
+                    all_lines.append(line)
+        desc = " | ".join(all_lines)[:300] if all_lines else "（OCR 无文字）"
+        db.set_description(r["id"], desc)
+        # 删图
+        for p in files:
+            p.unlink()
+        done += 1
+        print(f"  id={r['id']} ✓ OCR {len(files)} 屏 → 删图 | {desc[:50]}")
+    print(f"完成：{done} 个样本已 OCR 分析，截图已删。")
+    return 0
+
+
 def main(argv: list[str]) -> int:
     if not argv or argv[0] == "--list":
         return list_pending()
+    if argv[0] == "--ocr":
+        return ocr_all()
     if argv[0] == "_set":
         if len(argv) < 3:
             print("用法: analyze.py _set <id> <description>", file=sys.stderr)
